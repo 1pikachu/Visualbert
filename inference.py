@@ -180,30 +180,143 @@ def parse_args():
     print(args)
     return args
 
+def trace_handler(p):
+    output = p.key_averages().table(sort_by="self_cpu_time_total")
+    print(output)
+    import pathlib
+    timeline_dir = str(pathlib.Path.cwd()) + '/timeline/'
+    if not os.path.exists(timeline_dir):
+        try:
+            os.makedirs(timeline_dir)
+        except:
+            pass
+    timeline_file = timeline_dir + 'timeline-' + str(torch.backends.quantized.engine) + \
+            '-' + str(p.step_num) + '-' + str(os.getpid()) + '.json'
+    p.export_chrome_trace(timeline_file)
+
 def inference(args, model, tokenizer, question_info, visual_embeds):
     # prepare input
     question_inputs = [question_info['question']] * args.batch_size
     tokens = tokenizer(question_inputs, padding='max_length', max_length=50)
-    input_ids = torch.tensor(tokens["input_ids"])
-    attention_mask = torch.tensor(tokens["attention_mask"])
-    token_type_ids = torch.tensor(tokens["token_type_ids"])
+    input_ids = torch.tensor(tokens["input_ids"]).to(args.device)
+    attention_mask = torch.tensor(tokens["attention_mask"]).to(args.device)
+    token_type_ids = torch.tensor(tokens["token_type_ids"]).to(args.device)
 
-    visual_embeds = torch.stack(visual_embeds)
-    visual_attention_mask = torch.ones(visual_embeds.shape[:-1], dtype=torch.long)
-    visual_token_type_ids = torch.ones(visual_embeds.shape[:-1], dtype=torch.long)
+    visual_embeds = torch.stack(visual_embeds).to(args.device)
+    visual_attention_mask = torch.ones(visual_embeds.shape[:-1], dtype=torch.long).to(args.device)
+    visual_token_type_ids = torch.ones(visual_embeds.shape[:-1], dtype=torch.long).to(args.device)
+
+    model = model.to(args.device)
+
+    if args.channels_last:
+        model = model.to(memory_format=torch.channels_last)
+        print("---- use NHWC format")
+    if args.nv_fuser:
+       fuser_mode = "fuser2"
+    else:
+       fuser_mode = "none"
+    print("---- fuser mode:", fuser_mode)
+    if args.jit:
+        try:
+            model = torch.jit.trace(model, (input_ids, attention_mask, token_type_ids,
+                None, None, None,
+                visual_embeds, visual_attention_mask, visual_token_type_ids), check_trace=False, strict=False)
+            print("---- JIT trace enable.")
+        except (RuntimeError, TypeError) as e:
+            print("---- JIT trace disable.")
+            print("failed to use PyTorch jit mode due to: ", e)
 
     # forward
     total_time = 0.0
     total_sample = 0
 
-    for i in range(args.num_iter + args.num_warmup):
-        elapsed = time.time()
-        outputs = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, visual_embeds=visual_embeds, visual_attention_mask=visual_attention_mask, visual_token_type_ids=visual_token_type_ids)
-        elapsed = time.time() - elapsed
-        print("Iteration: {}, inference time: {} sec.".format(i, elapsed), flush=True)
-        if i >= args.num_warmup:
-            total_sample += args.batch_size
-            total_time += elapsed
+    if args.profile and args.device == "xpu":
+        for i in range(args.num_iter + args.num_warmup):
+            elapsed = time.time()
+            with torch.autograd.profiler_legacy.profile(enabled=args.profile, use_xpu=True, record_shapes=False) as prof:
+                outputs = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, visual_embeds=visual_embeds, visual_attention_mask=visual_attention_mask, visual_token_type_ids=visual_token_type_ids)
+            torch.xpu.synchronize()
+            elapsed = time.time() - elapsed
+            print("Iteration: {}, inference time: {} sec.".format(i, elapsed), flush=True)
+            if i >= args.num_warmup:
+                total_sample += args.batch_size
+                total_time += elapsed
+            if args.profile and i == int((args.num_iter + args.num_warmup)/2):
+                import pathlib
+                timeline_dir = str(pathlib.Path.cwd()) + '/timeline/'
+                if not os.path.exists(timeline_dir):
+                    try:
+                        os.makedirs(timeline_dir)
+                    except:
+                        pass
+                torch.save(prof.key_averages().table(sort_by="self_xpu_time_total"),
+                    timeline_dir+'profile.pt')
+                torch.save(prof.key_averages(group_by_input_shape=True).table(),
+                    timeline_dir+'profile_detail.pt')
+    elif args.profile and args.device == "cuda":
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+            record_shapes=True,
+            schedule=torch.profiler.schedule(
+                wait=int((args.num_iter + args.num_warmup)/2),
+                warmup=2,
+                active=1,
+            ),
+            on_trace_ready=trace_handler,
+        ) as p:
+            for i in range(args.num_iter + args.num_warmup):
+                elapsed = time.time()
+                with torch.jit.fuser(fuser_mode):
+                    outputs = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, visual_embeds=visual_embeds, visual_attention_mask=visual_attention_mask, visual_token_type_ids=visual_token_type_ids)
+                torch.cuda.synchronize()
+                elapsed = time.time() - elapsed
+                p.step()
+                print("Iteration: {}, inference time: {} sec.".format(i, elapsed), flush=True)
+                if i >= args.num_warmup:
+                    total_sample += args.batch_size
+                    total_time += elapsed
+    elif args.profile and args.device == "cpu":
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            record_shapes=True,
+            schedule=torch.profiler.schedule(
+                wait=int((args.num_iter + args.num_warmup)/2),
+                warmup=2,
+                active=1,
+            ),
+            on_trace_ready=trace_handler,
+        ) as p:
+            for i in range(args.num_iter + args.num_warmup):
+                elapsed = time.time()
+                outputs = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, visual_embeds=visual_embeds, visual_attention_mask=visual_attention_mask, visual_token_type_ids=visual_token_type_ids)
+                elapsed = time.time() - elapsed
+                p.step()
+                print("Iteration: {}, inference time: {} sec.".format(i, elapsed), flush=True)
+                if i >= args.num_warmup:
+                    total_sample += args.batch_size
+                    total_time += elapsed
+    elif not args.profile and args.device == "cuda":
+        for i in range(args.num_iter + args.num_warmup):
+            elapsed = time.time()
+            with torch.jit.fuser(fuser_mode):
+                outputs = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, visual_embeds=visual_embeds, visual_attention_mask=visual_attention_mask, visual_token_type_ids=visual_token_type_ids)
+            torch.cuda.synchronize()
+            elapsed = time.time() - elapsed
+            print("Iteration: {}, inference time: {} sec.".format(i, elapsed), flush=True)
+            if i >= args.num_warmup:
+                total_sample += args.batch_size
+                total_time += elapsed
+    else:
+        for i in range(args.num_iter + args.num_warmup):
+            elapsed = time.time()
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, visual_embeds=visual_embeds, visual_attention_mask=visual_attention_mask, visual_token_type_ids=visual_token_type_ids)
+            if args.device == "xpu":
+                torch.xpu.synchronize()
+            elapsed = time.time() - elapsed
+            print("Iteration: {}, inference time: {} sec.".format(i, elapsed), flush=True)
+            if i >= args.num_warmup:
+                total_sample += args.batch_size
+                total_time += elapsed
 
     latency = total_time / total_sample * 1000
     throughput = total_sample / total_time
@@ -212,6 +325,11 @@ def inference(args, model, tokenizer, question_info, visual_embeds):
 
 def main():
     args = parse_args()
+
+    if args.device == "xpu":
+        import intel_extension_for_pytorch
+    elif args.device == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = False
 
     # load config
     cfg_path = "COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"
@@ -267,7 +385,26 @@ def main():
     # Using the embeddings with VisualBert
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     model = VisualBertForPreTraining.from_pretrained('uclanlp/visualbert-nlvr2-coco-pre')
-    inference(args, model, tokenizer, question_info, visual_embeds)
+    with torch.inference_mode():
+        if args.precision == "float16" and args.device == "cuda":
+            print("---- Use autocast fp16 cuda")
+            with torch.cuda.amp.autocast(enabled=True, dtype=torch.float16):
+                inference(args, model, tokenizer, question_info, visual_embeds)
+        elif args.precision == "float16" and args.device == "xpu":
+            print("---- Use autocast fp16 xpu")
+            with torch.xpu.amp.autocast(enabled=True, dtype=torch.float16, cache_enabled=True):
+                inference(args, model, tokenizer, question_info, visual_embeds)
+        elif args.precision == "bfloat16" and args.device == "cpu":
+            print("---- Use autocast bf16 cpu")
+            with torch.cpu.amp.autocast(enabled=True, dtype=torch.bfloat16):
+                inference(args, model, tokenizer, question_info, visual_embeds)
+        elif args.precision == "bfloat16" and args.device == "xpu":
+            print("---- Use autocast bf16 xpu")
+            with torch.xpu.amp.autocast(dtype=torch.bfloat16):
+                inference(args, model, tokenizer, question_info, visual_embeds)
+        else:
+            print("---- no autocast")
+            inference(args, model, tokenizer, question_info, visual_embeds)
 
 
 if __name__ == "__main__":
