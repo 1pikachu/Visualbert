@@ -9,7 +9,7 @@ function main {
     set_environment
 
     # requirements
-    pip uninstall timm detectron2 transformers
+    pip uninstall timm detectron2 transformers -y
     pip install transformers==4.23.1
     python -m pip install 'git+https://github.com/facebookresearch/detectron2.git@v0.5'
 
