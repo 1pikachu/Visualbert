@@ -1,8 +1,8 @@
 #!/bin/bash
 set -xe
-source common.sh
 
 function main {
+    source common.sh
     # set common info
     init_params $@
     fetch_device_info
@@ -99,6 +99,8 @@ function generate_core_launcher {
     wget --no-proxy -O launch.py http://mengfeil-ubuntu.sh.intel.com/share/launch.py
 }
 
+# download common files
+wget -q -O common.sh https://raw.githubusercontent.com/mengfei25/oob-common/gpuoob/common.sh
 
 # Start
 main "$@"
