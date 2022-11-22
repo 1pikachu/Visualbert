@@ -385,7 +385,10 @@ def main():
     # Using the embeddings with VisualBert
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     model = VisualBertForPreTraining.from_pretrained('uclanlp/visualbert-nlvr2-coco-pre')
-    with torch.inference_mode():
+    with torch.no_grad():
+        model = model.eval()
+        datatype = torch.float16 if args.precision == "float16" else torch.bfloat16 if args.precision == "bfloat16" else torch.float
+        model = torch.xpu.optimize(model=model, dtype=datatype)
         if args.precision == "float16" and args.device == "cuda":
             print("---- Use autocast fp16 cuda")
             with torch.cuda.amp.autocast(enabled=True, dtype=torch.float16):
