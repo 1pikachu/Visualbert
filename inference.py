@@ -384,7 +384,7 @@ def main():
 
     # Using the embeddings with VisualBert
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    model = VisualBertForPreTraining.from_pretrained('uclanlp/visualbert-nlvr2-coco-pre')
+    model = VisualBertForPreTraining.from_pretrained('uclanlp/visualbert-nlvr2-coco-pre').to(args.device)
     with torch.no_grad():
         model.eval()
         if args.device == "xpu":
