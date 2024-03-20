@@ -55,13 +55,15 @@ function generate_core {
             OOB_EXEC_HEADER+=" -C $(echo ${device_array[i]} |awk -F ';' '{print $1}') "
         elif [ "${device}" == "cuda" ];then
             OOB_EXEC_HEADER=" CUDA_VISIBLE_DEVICES=${device_array[i]} "
-	    addtion_options+=" --nv_fuser "
+	        addtion_options+=" --nv_fuser "
+        elif [ "${device}" == "xpu" ];then
+            OOB_EXEC_HEADER=" ZE_AFFINITY_MASK=${i} "
         fi
         printf " ${OOB_EXEC_HEADER} \
-	    python inference.py --batch_size ${batch_size} \
-	    	--num_iter $num_iter --num_warmup $num_warmup \
-		--channels_last $channels_last --precision $precision \
-		--jit --device ${device} \
+            python inference.py --batch_size ${batch_size} \
+                --num_iter $num_iter --num_warmup $num_warmup \
+                --channels_last $channels_last --precision $precision \
+                --jit --device ${device} \
                 ${addtion_options} \
         > ${log_file} 2>&1 &  \n" |tee -a ${excute_cmd_file}
         if [ "${numa_nodes_use}" == "0" ];then
