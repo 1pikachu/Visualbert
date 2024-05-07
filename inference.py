@@ -176,6 +176,8 @@ def parse_args():
     parser.add_argument('--answers_path', default="/home2/pytorch-broad-models/VisualBert/v2_mscoco_val2014_annotations.json",
             type=str)
     parser.add_argument('--img_dir', default="/home2/pytorch-broad-models/COCO2014/val2014", type=str)
+    parser.add_argument('--compile', action='store_true', default=False, help='compile model')
+    parser.add_argument('--backend', default="inductor", type=str, help='backend')
     args = parser.parse_args()
     print(args)
     return args
@@ -225,6 +227,9 @@ def inference(args, model, tokenizer, question_info, visual_embeds):
         except (RuntimeError, TypeError) as e:
             print("---- JIT trace disable.")
             print("failed to use PyTorch jit mode due to: ", e)
+    if args.compile:
+        print("----enable compiler")
+        model = torch.compile(model, backend=args.backend, options={"freezing": True})
 
     # forward
     total_time = 0.0
