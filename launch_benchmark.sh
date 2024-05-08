@@ -10,7 +10,7 @@ function main {
 
     # requirements
     pip uninstall timm detectron2 transformers -y
-    pip install transformers==4.23.1 pillow==9.5.0
+    pip install transformers==4.23.1 pillow==9.5.0 opencv-python==4.8.0.74
     python -m pip install 'git+https://github.com/facebookresearch/detectron2.git@v0.5'
 
     # if multiple use 'xxx,xxx,xxx'
