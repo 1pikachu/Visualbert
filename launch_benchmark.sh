@@ -13,6 +13,11 @@ function main {
     pip install transformers==4.23.1 pillow==9.5.0 opencv-python==4.8.0.74
     python -m pip install 'git+https://github.com/facebookresearch/detectron2.git@v0.5'
 
+    if [[ "${device}" == "cuda" ]];then
+        ref_torchvision_version=`python -c "import torchvision;print(torchvision.__version__)" | awk -F'+' '{print $1}'`
+        pip install torchvision --no-deps
+    fi
+
     # if multiple use 'xxx,xxx,xxx'
     model_name_list=($(echo "${model_name}" |sed 's/,/ /g'))
     batch_size_list=($(echo "${batch_size}" |sed 's/,/ /g'))
@@ -39,6 +44,10 @@ function main {
             collect_perf_logs
         done
     done
+
+    if [[ "${device}" == "cuda" ]];then
+        pip install torchvision==${ref_torchvision_version} --no-deps
+    fi
 }
 
 # run
