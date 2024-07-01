@@ -15,7 +15,7 @@ function main {
 
     if [[ "${device}" == "cuda" ]];then
         ref_torchvision_version=`python -c "import torchvision;print(torchvision.__version__)" | awk -F'+' '{print $1}'`
-        pip install torchvision --no-deps
+        pip uninstall torchvision -y && pip install torchvision --no-deps
     fi
 
     # if multiple use 'xxx,xxx,xxx'
