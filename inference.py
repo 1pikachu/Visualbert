@@ -178,6 +178,7 @@ def parse_args():
     parser.add_argument('--img_dir', default="/home2/pytorch-broad-models/COCO2014/val2014", type=str)
     parser.add_argument('--compile', action='store_true', default=False, help='compile model')
     parser.add_argument('--backend', default="inductor", type=str, help='backend')
+    parser.add_argument('--ipex', action='store_true', default=False)
     args = parser.parse_args()
     print(args)
     return args
@@ -331,8 +332,9 @@ def inference(args, model, tokenizer, question_info, visual_embeds):
 def main():
     args = parse_args()
 
-    if args.device == "xpu":
+    if args.device == "xpu" and args.ipex:
         import intel_extension_for_pytorch
+        print("Use IPEX")
     elif args.device == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = False
 
@@ -392,8 +394,8 @@ def main():
     model = VisualBertForPreTraining.from_pretrained('uclanlp/visualbert-nlvr2-coco-pre').to(args.device)
     with torch.no_grad():
         model.eval()
-        if args.device == "xpu":
-            datatype = torch.float16 if args.precision == "float16" else torch.bfloat16 if args.precision == "bfloat16" else torch.float
+        datatype = torch.float16 if args.precision == "float16" else torch.bfloat16 if args.precision == "bfloat16" else torch.float
+        if args.device == "xpu" and args.ipex:
             model = torch.xpu.optimize(model=model, dtype=datatype)
         if args.precision == "float16" and args.device == "cuda":
             print("---- Use autocast fp16 cuda")
