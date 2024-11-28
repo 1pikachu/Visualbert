@@ -399,19 +399,19 @@ def main():
             model = torch.xpu.optimize(model=model, dtype=datatype)
         if args.precision == "float16" and args.device == "cuda":
             print("---- Use autocast fp16 cuda")
-            with torch.autocast(enabled=True, dtype=torch.float16):
+            with torch.autocast(enabled=True, dtype=torch.float16, device_type=args.device):
                 inference(args, model, tokenizer, question_info, visual_embeds)
         elif args.precision == "float16" and args.device == "xpu":
             print("---- Use autocast fp16 xpu")
-            with torch.autocast(enabled=True, dtype=torch.float16, cache_enabled=True):
+            with torch.autocast(enabled=True, dtype=torch.float16, cache_enabled=True, device_type=args.device):
                 inference(args, model, tokenizer, question_info, visual_embeds)
         elif args.precision == "bfloat16" and args.device == "cpu":
             print("---- Use autocast bf16 cpu")
-            with torch.autocast(enabled=True, dtype=torch.bfloat16):
+            with torch.autocast(enabled=True, dtype=torch.bfloat16, device_type=args.device):
                 inference(args, model, tokenizer, question_info, visual_embeds)
         elif args.precision == "bfloat16" and args.device == "xpu":
             print("---- Use autocast bf16 xpu")
-            with torch.autocast(dtype=torch.bfloat16):
+            with torch.autocast(enabled=True, dtype=torch.bfloat16, device_type=args.device):
                 inference(args, model, tokenizer, question_info, visual_embeds)
         else:
             print("---- no autocast")
